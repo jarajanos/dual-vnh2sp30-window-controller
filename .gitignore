@@ -1,0 +1,8 @@
+.vscode
+{main,components}/
+/main/config.h
+build/
+managed_components/
+.clangd
+dependencies.lock
+sdkconfig*
