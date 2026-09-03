@@ -6,7 +6,6 @@
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_log.h"
-#include "nvs_flash.h"
 
 static const char *TAG = "WIFI";
 
@@ -41,13 +40,6 @@ static void event_handler(void *arg, esp_event_base_t base,
 }
 
 esp_err_t wifi_init_sta(void) {
-    // The Wi-Fi stack requires NVS.
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        nvs_flash_erase();
-        nvs_flash_init();
-    }
-
     s_wifi_event_group = xEventGroupCreate();
 
     ESP_ERROR_CHECK(esp_netif_init());

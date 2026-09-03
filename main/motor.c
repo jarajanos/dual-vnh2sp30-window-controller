@@ -8,6 +8,7 @@
 static const char *TAG = "MOTOR";
 
 static adc_oneshot_unit_handle_t adc1_handle = NULL;
+static portMUX_TYPE s_config_mux = portMUX_INITIALIZER_UNLOCKED;
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
@@ -25,6 +26,12 @@ static void apply_brake(motor_t *m) {
 
 static bool motor_is_moving(const motor_t *m) {
     return m->state == MOTOR_OPENING || m->state == MOTOR_CLOSING;
+}
+
+static void snapshot_config(motor_t *m) {
+    taskENTER_CRITICAL(&s_config_mux);
+    m->active_config = m->config;
+    taskEXIT_CRITICAL(&s_config_mux);
 }
 
 static void finish_at_endstop(motor_t *m) {
@@ -96,7 +103,8 @@ void motor_init(motor_t *m) {
 void motor_open(motor_t *m) {
     if (m->state == MOTOR_OPENING || m->state == MOTOR_OPENED) return;
     ESP_LOGI(TAG, "[%s] OPEN", m->name);
-    set_pins(m, 1, 0, MOTOR_PWM_DUTY);
+    snapshot_config(m);
+    set_pins(m, 1, 0, m->active_config.pwm_duty);
     m->state             = MOTOR_OPENING;
     m->state_changed     = true;
     m->stop_reason       = STOP_REASON_NONE;
@@ -111,7 +119,8 @@ void motor_open(motor_t *m) {
 void motor_close(motor_t *m) {
     if (m->state == MOTOR_CLOSING || m->state == MOTOR_CLOSED) return;
     ESP_LOGI(TAG, "[%s] CLOSE", m->name);
-    set_pins(m, 0, 1, MOTOR_PWM_DUTY);
+    snapshot_config(m);
+    set_pins(m, 0, 1, m->active_config.pwm_duty);
     m->state             = MOTOR_CLOSING;
     m->state_changed     = true;
     m->stop_reason       = STOP_REASON_NONE;
@@ -167,7 +176,7 @@ void motor_update(motor_t *m) {
     uint32_t elapsed_ms = (now - m->start_tick) * portTICK_PERIOD_MS;
 
     // 1) Timeout
-    if (elapsed_ms >= MOTOR_TIMEOUT_MS) {
+    if (elapsed_ms >= m->active_config.timeout_ms) {
         ESP_LOGW(TAG, "[%s] Timeout after %lu ms", m->name, (unsigned long)elapsed_ms);
         motor_stop(m, STOP_REASON_TIMEOUT);
         return;
@@ -186,19 +195,19 @@ void motor_update(motor_t *m) {
             m->cs_average_raw = raw;
         }
 
-        bool overcurrent = elapsed_ms >= CS_OVERCURRENT_MIN_RUN_MS &&
-                           m->cs_average_raw >= CS_OVERCURRENT_MIN_RAW &&
-                           raw * 100 >= m->cs_average_raw * CS_OVERCURRENT_PERCENT;
+        bool overcurrent = elapsed_ms >= m->active_config.overcurrent_min_run_ms &&
+                           m->cs_average_raw >= (int)m->active_config.overcurrent_min_raw &&
+                           raw * 100 >= m->cs_average_raw * (int)m->active_config.overcurrent_percent;
 
         if (overcurrent) {
             m->overcurrent_count++;
             ESP_LOGW(TAG, "[%s] Overcurrent raw=%d, average=%d (%u/%u)",
                      m->name, raw, m->cs_average_raw,
                      (unsigned)m->overcurrent_count,
-                     (unsigned)CS_OVERCURRENT_COUNT);
-            if (m->overcurrent_count >= CS_OVERCURRENT_COUNT) {
+                     (unsigned)m->active_config.overcurrent_count);
+            if (m->overcurrent_count >= m->active_config.overcurrent_count) {
                 ESP_LOGE(TAG, "[%s] Stopping — current exceeded average by %d %%!",
-                         m->name, CS_OVERCURRENT_PERCENT - 100);
+                         m->name, (int)m->active_config.overcurrent_percent - 100);
                 motor_stop(m, STOP_REASON_OVERCURRENT);
                 return;
             }
@@ -207,17 +216,17 @@ void motor_update(motor_t *m) {
         }
 
         // An end stop is the opposite event: a sharp drop against the same average.
-        bool drop = elapsed_ms >= CS_ENDSTOP_MIN_RUN_MS &&
-                    m->cs_average_raw >= CS_ENDSTOP_MIN_RAW &&
-                    raw * 100 <= m->cs_average_raw * CS_ENDSTOP_DROP_PERCENT;
+        bool drop = elapsed_ms >= m->active_config.endstop_min_run_ms &&
+                    m->cs_average_raw >= (int)m->active_config.endstop_min_raw &&
+                    raw * 100 <= m->cs_average_raw * (int)m->active_config.endstop_drop_percent;
 
         if (drop) {
             m->endstop_count++;
             ESP_LOGW(TAG, "[%s] Current drop raw=%d from %d (%u/%u)",
                      m->name, raw, m->cs_average_raw,
                      (unsigned)m->endstop_count,
-                     (unsigned)CS_ENDSTOP_COUNT);
-            if (m->endstop_count >= CS_ENDSTOP_COUNT) {
+                     (unsigned)m->active_config.endstop_count);
+            if (m->endstop_count >= m->active_config.endstop_count) {
                 finish_at_endstop(m);
                 return;
             }
@@ -288,4 +297,39 @@ bool motor_take_alarm(motor_t *m) {
     bool v = m->alarm_pending;
     m->alarm_pending = false;
     return v;
+}
+
+bool motor_config_validate(const motor_config_t *c,
+                           const char **field, const char **reason) {
+#define CHECK(name, condition, why) do { \
+    if (!(condition)) { \
+        if (field) *field = (name); \
+        if (reason) *reason = (why); \
+        return false; \
+    } \
+} while (0)
+    CHECK("pwm_duty", c->pwm_duty >= 1 && c->pwm_duty <= 255, "must be 1..255");
+    CHECK("timeout_ms", c->timeout_ms >= 100 && c->timeout_ms <= 3600000, "must be 100..3600000");
+    CHECK("overcurrent_min_run_ms", c->overcurrent_min_run_ms <= c->timeout_ms, "must not exceed timeout_ms");
+    CHECK("overcurrent_min_raw", c->overcurrent_min_raw <= 4095, "must be 0..4095");
+    CHECK("overcurrent_percent", c->overcurrent_percent >= 101 && c->overcurrent_percent <= 1000, "must be 101..1000");
+    CHECK("overcurrent_count", c->overcurrent_count >= 1 && c->overcurrent_count <= 255, "must be 1..255");
+    CHECK("endstop_min_run_ms", c->endstop_min_run_ms <= c->timeout_ms, "must not exceed timeout_ms");
+    CHECK("endstop_min_raw", c->endstop_min_raw <= 4095, "must be 0..4095");
+    CHECK("endstop_drop_percent", c->endstop_drop_percent >= 1 && c->endstop_drop_percent <= 99, "must be 1..99");
+    CHECK("endstop_count", c->endstop_count >= 1 && c->endstop_count <= 255, "must be 1..255");
+#undef CHECK
+    return true;
+}
+
+void motor_set_config(motor_t *m, const motor_config_t *config) {
+    taskENTER_CRITICAL(&s_config_mux);
+    m->config = *config;
+    taskEXIT_CRITICAL(&s_config_mux);
+}
+
+void motor_get_config(const motor_t *m, motor_config_t *config) {
+    taskENTER_CRITICAL(&s_config_mux);
+    *config = m->config;
+    taskEXIT_CRITICAL(&s_config_mux);
 }

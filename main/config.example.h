@@ -12,6 +12,9 @@
 #define MQTT_CLIENT_ID      "window-controller"
 #define MQTT_KEEPALIVE_S    60
 
+// Local configuration UI: http://<device-ip>/
+#define WEB_CONFIG_PORT     80
+
 // Command topics (payload: "open" | "close" | "stop")
 #define TOPIC_CMD_M1        "home/greenhouse/window/motor1/cmd"
 #define TOPIC_CMD_M2        "home/greenhouse/window/motor2/cmd"
@@ -52,7 +55,7 @@
 #define LEDC_CH_M2          LEDC_CHANNEL_1
 #define LEDC_FREQ_HZ        20000       // 20 kHz — above the audible range
 #define LEDC_DUTY_BITS      LEDC_TIMER_8_BIT  // 0–255
-#define MOTOR_PWM_DUTY      128         // 0–255
+#define MOTOR_PWM_DUTY      128         // Shared default, 0–255
 
 // ─── Motor protection ─────────────────────────────────────────────────────────
 // Maximum continuous motor run time
@@ -81,6 +84,31 @@
 #define CS_ENDSTOP_MIN_RAW          5
 #define CS_ENDSTOP_DROP_PERCENT     45
 #define CS_ENDSTOP_COUNT            3
+
+// ─── Per-motor defaults ───────────────────────────────────────────────────────
+// These values are used when no saved configuration exists in NVS. Each one
+// can be changed independently later through the web UI.
+#define MOTOR1_PWM_DUTY                  MOTOR_PWM_DUTY
+#define MOTOR1_TIMEOUT_MS                MOTOR_TIMEOUT_MS
+#define MOTOR1_OVERCURRENT_MIN_RUN_MS    CS_OVERCURRENT_MIN_RUN_MS
+#define MOTOR1_OVERCURRENT_MIN_RAW       CS_OVERCURRENT_MIN_RAW
+#define MOTOR1_OVERCURRENT_PERCENT       CS_OVERCURRENT_PERCENT
+#define MOTOR1_OVERCURRENT_COUNT         CS_OVERCURRENT_COUNT
+#define MOTOR1_ENDSTOP_MIN_RUN_MS        CS_ENDSTOP_MIN_RUN_MS
+#define MOTOR1_ENDSTOP_MIN_RAW           CS_ENDSTOP_MIN_RAW
+#define MOTOR1_ENDSTOP_DROP_PERCENT      CS_ENDSTOP_DROP_PERCENT
+#define MOTOR1_ENDSTOP_COUNT             CS_ENDSTOP_COUNT
+
+#define MOTOR2_PWM_DUTY                  MOTOR_PWM_DUTY
+#define MOTOR2_TIMEOUT_MS                MOTOR_TIMEOUT_MS
+#define MOTOR2_OVERCURRENT_MIN_RUN_MS    CS_OVERCURRENT_MIN_RUN_MS
+#define MOTOR2_OVERCURRENT_MIN_RAW       CS_OVERCURRENT_MIN_RAW
+#define MOTOR2_OVERCURRENT_PERCENT       CS_OVERCURRENT_PERCENT
+#define MOTOR2_OVERCURRENT_COUNT         CS_OVERCURRENT_COUNT
+#define MOTOR2_ENDSTOP_MIN_RUN_MS        CS_ENDSTOP_MIN_RUN_MS
+#define MOTOR2_ENDSTOP_MIN_RAW           CS_ENDSTOP_MIN_RAW
+#define MOTOR2_ENDSTOP_DROP_PERCENT      CS_ENDSTOP_DROP_PERCENT
+#define MOTOR2_ENDSTOP_COUNT             CS_ENDSTOP_COUNT
 
 // ─── Switches ─────────────────────────────────────────────────────────────────
 #define SW_DEBOUNCE_MS      50

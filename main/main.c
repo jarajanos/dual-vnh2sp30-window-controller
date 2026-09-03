@@ -11,6 +11,8 @@
 #include "switch.h"
 #include "wifi.h"
 #include "mqtt.h"
+#include "settings.h"
+#include "web_config.h"
 
 static const char *TAG = "MAIN";
 
@@ -24,6 +26,18 @@ static motor_t motor1 = {
     .cs_channel = ADC_CHANNEL_1,   // GPIO1 = ADC1_CH1 on ESP32-C3
     .cs_unit    = ADC_UNIT_1,
     .ledc_ch    = LEDC_CH_M1,
+    .config = {
+        .pwm_duty = MOTOR1_PWM_DUTY,
+        .timeout_ms = MOTOR1_TIMEOUT_MS,
+        .overcurrent_min_run_ms = MOTOR1_OVERCURRENT_MIN_RUN_MS,
+        .overcurrent_min_raw = MOTOR1_OVERCURRENT_MIN_RAW,
+        .overcurrent_percent = MOTOR1_OVERCURRENT_PERCENT,
+        .overcurrent_count = MOTOR1_OVERCURRENT_COUNT,
+        .endstop_min_run_ms = MOTOR1_ENDSTOP_MIN_RUN_MS,
+        .endstop_min_raw = MOTOR1_ENDSTOP_MIN_RAW,
+        .endstop_drop_percent = MOTOR1_ENDSTOP_DROP_PERCENT,
+        .endstop_count = MOTOR1_ENDSTOP_COUNT,
+    },
 };
 
 static motor_t motor2 = {
@@ -34,6 +48,18 @@ static motor_t motor2 = {
     .cs_channel = ADC_CHANNEL_0,   // GPIO0 = ADC1_CH0 on ESP32-C3
     .cs_unit    = ADC_UNIT_1,
     .ledc_ch    = LEDC_CH_M2,
+    .config = {
+        .pwm_duty = MOTOR2_PWM_DUTY,
+        .timeout_ms = MOTOR2_TIMEOUT_MS,
+        .overcurrent_min_run_ms = MOTOR2_OVERCURRENT_MIN_RUN_MS,
+        .overcurrent_min_raw = MOTOR2_OVERCURRENT_MIN_RAW,
+        .overcurrent_percent = MOTOR2_OVERCURRENT_PERCENT,
+        .overcurrent_count = MOTOR2_OVERCURRENT_COUNT,
+        .endstop_min_run_ms = MOTOR2_ENDSTOP_MIN_RUN_MS,
+        .endstop_min_raw = MOTOR2_ENDSTOP_MIN_RAW,
+        .endstop_drop_percent = MOTOR2_ENDSTOP_DROP_PERCENT,
+        .endstop_count = MOTOR2_ENDSTOP_COUNT,
+    },
 };
 
 // ─── Switches ─────────────────────────────────────────────────────────────────
@@ -193,26 +219,43 @@ void app_main(void) {
     ESP_LOGI(TAG, "║  Window Controller v1.0  ║");
     ESP_LOGI(TAG, "╚══════════════════════════╝");
 
-    // 1) Shared LEDC timer
+    // 1) NVS and persisted per-motor settings
+    ESP_ERROR_CHECK(settings_init());
+    motor_config_t loaded;
+    ESP_ERROR_CHECK(settings_load_motor(0, &motor1.config, &loaded));
+    motor_set_config(&motor1, &loaded);
+    ESP_ERROR_CHECK(settings_load_motor(1, &motor2.config, &loaded));
+    motor_set_config(&motor2, &loaded);
+
+    // 2) Shared LEDC timer
     ledc_timer_init();
 
-    // 2) Motors
+    // 3) Motors
     motor_init(&motor1);
     motor_init(&motor2);
 
-    // 3) Switches
+    // 4) Switches
     switch_init(&sw1, PIN_SW1, sw1_cb, NULL);
     switch_init(&sw2, PIN_SW2, sw2_cb, NULL);
 
-    // 4) Wi-Fi (blocks until an IP address is assigned)
-    if (wifi_init_sta() != ESP_OK) {
-        ESP_LOGW(TAG, "Wi-Fi unavailable — MQTT will not work");
+    // 5) Wi-Fi (blocks until an IP address is assigned)
+    bool wifi_connected = wifi_init_sta() == ESP_OK;
+    if (!wifi_connected) {
+        ESP_LOGW(TAG, "Wi-Fi unavailable — MQTT and configuration UI will not work");
     }
 
-    // 5) MQTT (esp-mqtt handles reconnection internally)
+    // 6) MQTT (esp-mqtt handles reconnection internally)
     ESP_ERROR_CHECK(mqtt_init(on_mqtt_cmd));
 
-    // 6) Motor task with its own stack and a priority above IDLE
+    // 7) Configuration UI on the device IP address
+    if (wifi_connected) {
+        esp_err_t err = web_config_start(&motor1, &motor2);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Could not start configuration UI: %s", esp_err_to_name(err));
+        }
+    }
+
+    // 8) Motor task with its own stack and a priority above IDLE
     xTaskCreate(motor_task, "motor_task", 4096, NULL, 5, NULL);
 
     ESP_LOGI(TAG, "System started.");

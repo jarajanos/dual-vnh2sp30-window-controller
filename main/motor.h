@@ -24,6 +24,21 @@ typedef enum {
 } stop_reason_t;
 
 typedef struct {
+    uint32_t pwm_duty;
+    uint32_t timeout_ms;
+
+    uint32_t overcurrent_min_run_ms;
+    uint32_t overcurrent_min_raw;
+    uint32_t overcurrent_percent;
+    uint32_t overcurrent_count;
+
+    uint32_t endstop_min_run_ms;
+    uint32_t endstop_min_raw;
+    uint32_t endstop_drop_percent;
+    uint32_t endstop_count;
+} motor_config_t;
+
+typedef struct {
     const char      *name;
 
     // GPIO
@@ -38,6 +53,10 @@ typedef struct {
     // LEDC
     ledc_channel_t   ledc_ch;
 
+    // Configured values and the immutable snapshot used for current movement.
+    motor_config_t   config;
+    motor_config_t   active_config;
+
     // State (private — do not modify directly)
     motor_state_t    state;
     stop_reason_t    stop_reason;
@@ -51,6 +70,16 @@ typedef struct {
     bool             state_changed;
     bool             alarm_pending;
 } motor_t;
+
+// Validate the complete configuration. If invalid, field/reason identify the
+// first rejected value when the corresponding output pointer is non-NULL.
+bool motor_config_validate(const motor_config_t *config,
+                           const char **field, const char **reason);
+
+// Thread-safe configuration access. A changed configuration takes effect on
+// the next movement; a motor already moving keeps its active snapshot.
+void motor_set_config(motor_t *m, const motor_config_t *config);
+void motor_get_config(const motor_t *m, motor_config_t *config);
 
 // Initialize the motor GPIO and LEDC channel, then apply the brake.
 void motor_init(motor_t *m);

@@ -5,6 +5,8 @@ idf_component_register(
         "switch.c"
         "wifi.c"
         "mqtt.c"
+        "settings.c"
+        "web_config.c"
     INCLUDE_DIRS "."
     REQUIRES 
         esp_adc
@@ -14,5 +16,6 @@ idf_component_register(
         esp_event
         esp_netif
         nvs_flash
+        esp_http_server
         mqtt
 )

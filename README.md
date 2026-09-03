@@ -35,10 +35,41 @@ Edit `main/config.h`:
 #define MQTT_BROKER_URI  "mqtt://192.168.1.100:1883"
 ```
 
-The motor PWM duty, movement timeout, current detection, GPIO mapping, switch
-debounce, and diagnostic interval are configured in the same file. The local
+GPIO mapping and shared defaults are configured in the same file. The local
 `main/config.h` is ignored by Git so credentials are not committed; update
 `main/config.example.h` when adding shared configuration options.
+
+Each motor has independent startup defaults (`MOTOR1_*` and `MOTOR2_*`) for PWM,
+movement timeout, overcurrent detection, and end-stop detection. Saved values
+in NVS take precedence over these defaults.
+
+## Web configuration
+
+After connecting to Wi-Fi, open the IP address printed in the serial log, for
+example `http://192.168.1.123/`. The page edits and validates both motor
+configurations independently and stores them in NVS, so they survive a restart
+or firmware update. A motor which is already moving finishes that movement with
+its previous configuration; new values apply when the motor starts again.
+
+The JSON representation is available at `GET /api/config`. The web UI saves
+through `POST /api/config` using URL-encoded fields. The server listens on
+`WEB_CONFIG_PORT` (80 by default) and currently has no authentication, so it
+should only be exposed on a trusted local network.
+
+Accepted per-motor ranges:
+
+| Field | Range |
+|---|---:|
+| `pwm_duty` | 1–255 |
+| `timeout_ms` | 100–3,600,000 ms |
+| `overcurrent_min_run_ms` | 0–`timeout_ms` |
+| `overcurrent_min_raw` | 0–4095 |
+| `overcurrent_percent` | 101–1000% |
+| `overcurrent_count` | 1–255 samples |
+| `endstop_min_run_ms` | 0–`timeout_ms` |
+| `endstop_min_raw` | 0–4095 |
+| `endstop_drop_percent` | 1–99% |
+| `endstop_count` | 1–255 samples |
 
 ## Window state machine
 
@@ -82,13 +113,13 @@ An overcurrent condition is detected when the measured current exceeds the
 moving average by 10% for two consecutive readings. The motor is actively
 braked and an MQTT alarm with reason `overcurrent` is published.
 
-Relevant settings:
+Relevant per-motor settings (shown for motor 1):
 
 ```c
-#define CS_OVERCURRENT_MIN_RUN_MS  500
-#define CS_OVERCURRENT_MIN_RAW     5
-#define CS_OVERCURRENT_PERCENT     110
-#define CS_OVERCURRENT_COUNT       2
+#define MOTOR1_OVERCURRENT_MIN_RUN_MS  500
+#define MOTOR1_OVERCURRENT_MIN_RAW     5
+#define MOTOR1_OVERCURRENT_PERCENT     110
+#define MOTOR1_OVERCURRENT_COUNT       2
 #define CS_AVERAGE_HISTORY_WEIGHT  7
 ```
 
@@ -99,13 +130,13 @@ current falls to 45% or less of the moving average for three consecutive
 readings, the motor is actively braked and its state changes to `opened` or
 `closed`, depending on its direction.
 
-Relevant settings:
+Relevant per-motor settings (shown for motor 1):
 
 ```c
-#define CS_ENDSTOP_MIN_RUN_MS    500
-#define CS_ENDSTOP_MIN_RAW       5
-#define CS_ENDSTOP_DROP_PERCENT  45
-#define CS_ENDSTOP_COUNT         3
+#define MOTOR1_ENDSTOP_MIN_RUN_MS    500
+#define MOTOR1_ENDSTOP_MIN_RAW       5
+#define MOTOR1_ENDSTOP_DROP_PERCENT  45
+#define MOTOR1_ENDSTOP_COUNT         3
 ```
 
 Both current thresholds should be tuned using measurements from the actual
@@ -125,7 +156,9 @@ window-esp-idf/
     ├── motor.h / .c      # Motor control, state machine, and protection
     ├── switch.h / .c     # Active-low switch debounce
     ├── wifi.h / .c       # Wi-Fi station initialization
-    └── mqtt.h / .c       # esp-mqtt wrapper with LWT support
+    ├── mqtt.h / .c       # esp-mqtt wrapper with LWT support
+    ├── settings.h / .c   # Per-motor NVS persistence
+    └── web_config.h / .c # HTTP configuration UI and API
 ```
 
 ## GPIO map
@@ -210,9 +243,9 @@ Diagnostics are published every 10 seconds to
 
 | Mechanism | Configuration | Behavior |
 |---|---|---|
-| Relative overcurrent | `CS_OVERCURRENT_*` | Active brake and alarm after repeated 10% excess |
-| End-stop detection | `CS_ENDSTOP_*` | Active brake and final window state after a sharp current drop |
-| Movement timeout | `MOTOR_TIMEOUT_MS=10000` | Active brake and alarm after 10 seconds |
+| Relative overcurrent | `MOTOR1/2_OVERCURRENT_*` or web UI | Active brake and alarm after a configured excess |
+| End-stop detection | `MOTOR1/2_ENDSTOP_*` or web UI | Active brake and final window state after a configured drop |
+| Movement timeout | `MOTOR1/2_TIMEOUT_MS` or web UI | Active brake and alarm after the configured time |
 | Active brake | INA=INB=LOW, PWM=0 | Stops the motor instead of coasting |
 | Switch debounce | `SW_DEBOUNCE_MS=50` | Suppresses mechanical switch bounce |
 | MQTT LWT | `TOPIC_LWT` | Reports an unexpected power or connection loss |
